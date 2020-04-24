@@ -40,7 +40,7 @@ static dispatch_semaphore_t DisplayQueue(CGDirectDisplayID displayID) {
 
  based on: https://github.com/glfw/glfw/pull/192/files
  */
-static bool IOServiceMatchesCGDisplayID(io_service_t serv, CGDirectDisplayID displayID)
+static bool IOServiceMatchesCGDisplayID(io_service_t serv, CGDirectDisplayID displayID, UInt32 serial_no)
 {
     CFDictionaryRef info;
     io_name_t	name;
@@ -91,6 +91,13 @@ static bool IOServiceMatchesCGDisplayID(io_service_t serv, CGDirectDisplayID dis
         CGDisplayModelNumber(displayID)  != productID ||
         CGDisplaySerialNumber(displayID) != serialNumber)
     {
+        if (serial_no == 0) {
+            CFRelease(info);
+            return false;
+        }
+    }
+    
+    if (serial_no != 0 && serialNumber != serial_no) {
         CFRelease(info);
         return false;
     }
@@ -146,7 +153,7 @@ static bool IOServiceSendRequest(io_service_t framebuffer, IOI2CRequest *request
     return false;
 }
 
-static bool DisplayRequest(CGDirectDisplayID displayID, IOI2CRequest *request) {
+static bool DisplayRequest(CGDirectDisplayID displayID, UInt32 serial_no, IOI2CRequest *request) {
     dispatch_semaphore_t queue = DisplayQueue(displayID);
     dispatch_semaphore_wait(queue, DISPATCH_TIME_FOREVER);
 
@@ -173,7 +180,7 @@ static bool DisplayRequest(CGDirectDisplayID displayID, IOI2CRequest *request) {
         // We're comparing the info we get to hopefully find the correct
         // io_service_t, but in case there are identical displays this
         // might match for more than one.
-        if (!IOServiceMatchesCGDisplayID(framebuffer, displayID))
+        if (!IOServiceMatchesCGDisplayID(framebuffer, displayID, serial_no))
             continue;
 
         found = true;
@@ -192,7 +199,7 @@ static bool DisplayRequest(CGDirectDisplayID displayID, IOI2CRequest *request) {
     return found && all_success;
 }
 
-bool DDCWrite(CGDirectDisplayID displayID, struct DDCWriteCommand *write) {
+bool DDCWrite(CGDirectDisplayID displayID, UInt32 serial_no, struct DDCWriteCommand *write) {
     IOI2CRequest    request;
     UInt8           data[7];
 
@@ -216,7 +223,7 @@ bool DDCWrite(CGDirectDisplayID displayID, struct DDCWriteCommand *write) {
     request.replyTransactionType            = kIOI2CNoTransactionType;
     request.replyBytes                      = 0;
 
-    return DisplayRequest(displayID, &request);
+    return DisplayRequest(displayID, serial_no, &request);
 }
 
 bool DDCRead(CGDirectDisplayID displayID, struct DDCReadCommand *read) {
@@ -253,7 +260,7 @@ bool DDCRead(CGDirectDisplayID displayID, struct DDCReadCommand *read) {
         request.replyBuffer = (vm_address_t) reply_data;
         request.replyBytes = sizeof(reply_data);
         
-        result = DisplayRequest(displayID, &request);
+        result = DisplayRequest(displayID, 0, &request);
         result = (result && reply_data[0] == request.sendAddress && reply_data[2] == 0x2 && reply_data[4] == read->control_id && reply_data[10] == (request.replyAddress ^ request.replySubAddress ^ reply_data[1] ^ reply_data[2] ^ reply_data[3] ^ reply_data[4] ^ reply_data[5] ^ reply_data[6] ^ reply_data[7] ^ reply_data[8] ^ reply_data[9]));
     
         if (result) { // checksum is ok
@@ -392,7 +399,7 @@ UInt32 SupportedTransactionType() {
 }
 
 
-bool EDIDTest(CGDirectDisplayID displayID, struct EDID *edid) {
+bool EDIDTest(CGDirectDisplayID displayID, UInt32 serial_no, struct EDID *edid) {
     IOI2CRequest request = {};
 /*! from https://opensource.apple.com/source/IOGraphics/IOGraphics-513.1/IOGraphicsFamily/IOKit/i2c/IOI2CInterface.h.auto.html
  *  not in https://developer.apple.com/reference/kernel/1659924-ioi2cinterface.h/ioi2crequest?changes=latest_beta&language=objc
@@ -437,7 +444,7 @@ bool EDIDTest(CGDirectDisplayID displayID, struct EDID *edid) {
     request.replyTransactionType = kIOI2CSimpleTransactionType;
     request.replyBuffer = (vm_address_t) data;
     request.replyBytes = sizeof(data);
-    if (!DisplayRequest(displayID, &request)) return false;
+    if (!DisplayRequest(displayID, serial_no, &request)) return false;
     if (edid) memcpy(edid, &data, 128);
     UInt32 i = 0;
     UInt8 sum = 0;

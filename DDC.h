@@ -234,8 +234,8 @@ struct EDID {
     UInt8 checksum : 8;
 };
 
-bool DDCWrite(CGDirectDisplayID displayID, struct DDCWriteCommand *write);
+bool DDCWrite(CGDirectDisplayID displayID, UInt32 serial_no, struct DDCWriteCommand *write);
 bool DDCRead(CGDirectDisplayID displayID, struct DDCReadCommand *read);
-bool EDIDTest(CGDirectDisplayID displayID, struct EDID *edid);
+bool EDIDTest(CGDirectDisplayID displayID, UInt32 serial_no, struct EDID *edid);
 UInt32 SupportedTransactionType();
 #endif

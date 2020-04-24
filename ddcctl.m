@@ -55,14 +55,14 @@ uint getControl(CGDirectDisplayID cdisplay, uint control_id)
 }
 
 /* Set new value for control from display */
-void setControl(CGDirectDisplayID cdisplay, uint control_id, uint new_value)
+void setControl(CGDirectDisplayID cdisplay, uint serial_no, uint control_id, uint new_value)
 {
     struct DDCWriteCommand command;
     command.control_id = control_id;
     command.new_value = new_value;
     
     MyLog(@"D: setting VCP control #%u => %u", command.control_id, command.new_value);
-    if (!DDCWrite(cdisplay, &command)){
+    if (!DDCWrite(cdisplay, serial_no, &command)){
         MyLog(@"E: Failed to send DDC command!");
     }
 #ifdef OSD
@@ -91,7 +91,7 @@ void setControl(CGDirectDisplayID cdisplay, uint control_id, uint new_value)
 }
 
 /* Get current value to Set relative value for control from display */
-void getSetControl(CGDirectDisplayID cdisplay, uint control_id, NSString *new_value, NSString *operator)
+void getSetControl(CGDirectDisplayID cdisplay, uint serial_no, uint control_id, NSString *new_value, NSString *operator)
 {
     struct DDCReadCommand command;
     command.control_id = control_id;
@@ -116,7 +116,7 @@ void getSetControl(CGDirectDisplayID cdisplay, uint control_id, NSString *new_va
     // validate and write
     if (set_value.intValue >= 0 && set_value.intValue <= command.max_value) {
         MyLog(@"D: relative setting: %@ = %d", formula, set_value.intValue);
-        setControl(cdisplay, control_id, set_value.unsignedIntValue);
+        setControl(cdisplay, control_id, serial_no, set_value.unsignedIntValue);
     } else {
         MyLog(@"D: relative setting: %@ = %d is out of range!", formula, set_value.intValue);
     }
@@ -164,11 +164,13 @@ int main(int argc, const char * argv[])
         // Defaults
         NSString *screenName = @"";
         NSUInteger displayId = -1;
+        NSUInteger serialNumber = 0;
         NSUInteger command_interval = 100000;
         BOOL dump_values = NO;
         
         NSString *HelpString = @"Usage:\n"
         @"ddcctl \t-d <1-..>  [display#]\n"
+        @"ddcctl \t-s <..>  [serialNumber]\n"
         @"\t-w 100000  [delay usecs between settings]\n"
         @"\n"
         @"----- Basic settings -----\n"
@@ -208,6 +210,12 @@ int main(int argc, const char * argv[])
                 i++;
                 if (i >= argc) break;
                 displayId = atoi(argv[i]);
+            }
+            
+            else if (!strcmp(argv[i], "-s")) {
+                i++;
+                if (i >= argc) break;
+                serialNumber = atoi(argv[i]);
             }
             
             else if (!strcmp(argv[i], "-b")) {
@@ -342,13 +350,17 @@ int main(int argc, const char * argv[])
             }
         }
         
+        if (serialNumber > 0) {
+            MyLog(@"Trying to find serialNumber %lu", serialNumber);
+            displayId = 1;
+        }
         
         // Let's go...
         if (0 < displayId && displayId <= [_displayIDs count]) {
             MyLog(@"I: polling display %lu's EDID", displayId);
             CGDirectDisplayID cdisplay = (CGDirectDisplayID)[_displayIDs pointerAtIndex:displayId - 1];
             struct EDID edid = {};
-            if (EDIDTest(cdisplay, &edid)) {
+            if (EDIDTest(cdisplay, serialNumber, &edid)) {
 				for (union descriptor *des = edid.descriptors; des < edid.descriptors + sizeof(edid.descriptors); des++) {
                     switch (des->text.type)
                     {
@@ -380,16 +392,16 @@ int main(int argc, const char * argv[])
                         // this is a valid monitor control
                         NSString *argval_num = [argval stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"-+"]]; // look for relative setting ops
                         if ([argval hasPrefix:@"+"] || [argval hasPrefix:@"-"]) { // +/-NN relative
-                            getSetControl(cdisplay, control_id, argval_num, [argval substringToIndex:1]);
+                            getSetControl(cdisplay, serialNumber, control_id, argval_num, [argval substringToIndex:1]);
                         } else if ([argval hasSuffix:@"+"] || [argval hasSuffix:@"-"]) { // NN+/- relative
                             // read, calculate, then write
-                            getSetControl(cdisplay, control_id, argval_num, [argval substringFromIndex:argval.length - 1]);
+                            getSetControl(cdisplay, serialNumber, control_id, argval_num, [argval substringFromIndex:argval.length - 1]);
                         } else if ([argval hasPrefix:@"?"]) {
                             // read current setting
                             getControl(cdisplay, control_id);
                         } else if (argval_num == argval) {
                             // write fixed setting
-                            setControl(cdisplay, control_id, [argval intValue]);
+                            setControl(cdisplay, serialNumber, control_id, [argval intValue]);
                         }
                     }
                     usleep(command_interval); // stagger comms to these wimpy I2C mcu's
